@@ -5,6 +5,7 @@ from dataclasses import dataclass, asdict
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from threading import Lock
 from typing import Dict, List
 from urllib.parse import parse_qs, urlparse
 
@@ -18,6 +19,7 @@ class Contact:
 class PhoneBook:
     def __init__(self) -> None:
         self._contacts: Dict[str, Contact] = {}
+        self._lock = Lock()
 
     def add_contact(self, name: str, phone: str) -> Contact:
         key = name.strip().lower()
@@ -26,25 +28,29 @@ class PhoneBook:
         if not phone.strip():
             raise ValueError("Phone number is required.")
         contact = Contact(name=name.strip(), phone=phone.strip())
-        self._contacts[key] = contact
+        with self._lock:
+            self._contacts[key] = contact
         return contact
 
     def delete_contact(self, name: str) -> bool:
         key = name.strip().lower()
-        return self._contacts.pop(key, None) is not None
+        with self._lock:
+            return self._contacts.pop(key, None) is not None
 
     def search(self, query: str) -> List[Contact]:
         q = query.strip().lower()
+        with self._lock:
+            contacts = list(self._contacts.values())
         if not q:
-            return sorted(self._contacts.values(), key=lambda c: c.name.lower())
+            return sorted(contacts, key=lambda c: c.name.lower())
         return sorted(
-            [
-                contact
-                for contact in self._contacts.values()
-                if q in contact.name.lower() or q in contact.phone.lower()
-            ],
+            [contact for contact in contacts if self._matches_query(contact, q)],
             key=lambda c: c.name.lower(),
         )
+
+    @staticmethod
+    def _matches_query(contact: Contact, query: str) -> bool:
+        return query in contact.name.lower() or query in contact.phone.lower()
 
 
 class PhoneBookHandler(BaseHTTPRequestHandler):
